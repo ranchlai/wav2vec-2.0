@@ -1,4 +1,5 @@
 # Copyright 2020 The HuggingFace Team. All rights reserved.
+# Copyright (c) 2021 PaddlePaddle Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,9 +20,6 @@ import paddle.nn.functional as F
 from packaging import version
 
 
-
-
-
 def _gelu_python(x):
     """
     Original Implementation of the GELU activation function in Google BERT repo when initially created. For
@@ -31,13 +29,17 @@ def _gelu_python(x):
     """
     return x * 0.5 * (1.0 + paddle.erf(x / math.sqrt(2.0)))
 
+
 gelu = _gelu_python
+
+
 def gelu_new(x):
     """
     Implementation of the GELU activation function currently in Google BERT repo (identical to OpenAI GPT). Also see
     the Gaussian Error Linear Units paper: https://arxiv.org/abs/1606.08415
     """
-    return 0.5 * x * (1.0 + paddle.tanh(math.sqrt(2.0 / math.pi) * (x + 0.044715 * paddle.pow(x, 3.0))))
+    return 0.5 * x * (1.0 + paddle.tanh(
+        math.sqrt(2.0 / math.pi) * (x + 0.044715 * paddle.pow(x, 3.0))))
 
 
 # if version.parse(torch.__version__) < version.parse("1.4"):
@@ -47,7 +49,8 @@ def gelu_new(x):
 
 
 def gelu_fast(x):
-    return 0.5 * x * (1.0 + paddle.tanh(x * 0.7978845608 * (1.0 + 0.044715 * x * x)))
+    return 0.5 * x * (1.0 + paddle.tanh(x * 0.7978845608 *
+                                        (1.0 + 0.044715 * x * x)))
 
 
 def _silu_python(x):
@@ -59,12 +62,6 @@ def _silu_python(x):
     later.
     """
     return x * paddle.nn.functional.sigmoid(x)
-
-
-# if version.parse(torch.__version__) < version.parse("1.7"):
-#     silu = _silu_python
-# else:
-#     silu = F.silu
 
 
 def mish(x):
@@ -93,4 +90,6 @@ def get_activation(activation_string):
     if activation_string in ACT2FN:
         return ACT2FN[activation_string]
     else:
-        raise KeyError(f"function {activation_string} not found in ACT2FN mapping {list(ACT2FN.keys())}")
+        raise KeyError(
+            f"function {activation_string} not found in ACT2FN mapping {list(ACT2FN.keys())}"
+        )

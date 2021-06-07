@@ -1,5 +1,5 @@
-# %load pd.py
 # Copyright 2021 The Fairseq Authors and the HuggingFace Inc. team. All rights reserved.
+# Copyright (c) 2021 PaddlePaddle Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,30 +12,25 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" PyTorch Wav2Vec2 model. """
+""" Wav2Vec2 model """
 
 import warnings
-from typing import Optional, Tuple
-from dataclasses import dataclass
-from config import Wav2Vec2Config
+from collections import OrderedDict, UserDict
+from contextlib import contextmanager
+from dataclasses import dataclass, fields
 from typing import Any, BinaryIO, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import paddle
 import paddle.nn.functional as F
+from activations import ACT2FN
+from config_utils import PretrainedConfig
 from paddle import nn
 
-from act import ACT2FN
-
-from collections import OrderedDict, UserDict
-from contextlib import contextmanager
-from dataclasses import fields
 
 def is_tensor(x):
 
     return isinstance(x, paddle.Tensor)
-
-
 
 
 class ModelOutput(OrderedDict):
@@ -48,7 +43,6 @@ class ModelOutput(OrderedDict):
         You can't unpack a :obj:`ModelOutput` directly. Use the :meth:`~transformers.file_utils.ModelOutput.to_tuple`
         method to convert it to a tuple before.
     """
-
     def __post_init__(self):
         class_fields = fields(self)
 
@@ -59,7 +53,8 @@ class ModelOutput(OrderedDict):
         ), f"{self.__class__.__name__} should not have more than one required field."
 
         first_field = getattr(self, class_fields[0].name)
-        other_fields_are_none = all(getattr(self, field.name) is None for field in class_fields[1:])
+        other_fields_are_none = all(
+            getattr(self, field.name) is None for field in class_fields[1:])
 
         if other_fields_are_none and not is_tensor(first_field):
             try:
@@ -72,11 +67,9 @@ class ModelOutput(OrderedDict):
             # set the associated fields
             if first_field_iterator:
                 for element in iterator:
-                    if (
-                        not isinstance(element, (list, tuple))
-                        or not len(element) == 2
-                        or not isinstance(element[0], str)
-                    ):
+                    if (not isinstance(element,
+                                       (list, tuple)) or not len(element) == 2
+                            or not isinstance(element[0], str)):
                         break
                     setattr(self, element[0], element[1])
                     if element[1] is not None:
@@ -90,16 +83,23 @@ class ModelOutput(OrderedDict):
                     self[field.name] = v
 
     def __delitem__(self, *args, **kwargs):
-        raise Exception(f"You cannot use ``__delitem__`` on a {self.__class__.__name__} instance.")
+        raise Exception(
+            f"You cannot use ``__delitem__`` on a {self.__class__.__name__} instance."
+        )
 
     def setdefault(self, *args, **kwargs):
-        raise Exception(f"You cannot use ``setdefault`` on a {self.__class__.__name__} instance.")
+        raise Exception(
+            f"You cannot use ``setdefault`` on a {self.__class__.__name__} instance."
+        )
 
     def pop(self, *args, **kwargs):
-        raise Exception(f"You cannot use ``pop`` on a {self.__class__.__name__} instance.")
+        raise Exception(
+            f"You cannot use ``pop`` on a {self.__class__.__name__} instance.")
 
     def update(self, *args, **kwargs):
-        raise Exception(f"You cannot use ``update`` on a {self.__class__.__name__} instance.")
+        raise Exception(
+            f"You cannot use ``update`` on a {self.__class__.__name__} instance."
+        )
 
     def __getitem__(self, k):
         if isinstance(k, str):
@@ -126,17 +126,17 @@ class ModelOutput(OrderedDict):
         """
         return tuple(self[k] for k in self.keys())
 
+
 @dataclass
 class BaseModelOutput(ModelOutput):
-   
+
     last_hidden_state: paddle.Tensor = None
     hidden_states: Optional[Tuple[paddle.Tensor]] = None
     attentions: Optional[Tuple[paddle.Tensor]] = None
-        
+
 
 @dataclass
 class CausalLMOutput(BaseModelOutput):
-   
 
     loss: Optional[paddle.Tensor] = None
     logits: paddle.Tensor = None
@@ -146,15 +146,12 @@ class CausalLMOutput(BaseModelOutput):
 
 @dataclass
 class MaskedLMOutput(BaseModelOutput):
-  
+
     loss: Optional[paddle.Tensor] = None
     logits: paddle.Tensor = None
     hidden_states: Optional[Tuple[paddle.Tensor]] = None
     attentions: Optional[Tuple[paddle.Tensor]] = None
 
-
-
-_CONFIG_FOR_DOC = "Wav2Vec2Config"
 
 WAV_2_VEC_2_PRETRAINED_MODEL_ARCHIVE_LIST = [
     "facebook/wav2vec2-base-960h",
@@ -193,9 +190,7 @@ def _compute_mask_indices(
 
     all_num_mask = int(
         # add a random number for probabilistic rounding
-        mask_prob * all_sz / float(mask_length)
-        + np.random.rand()
-    )
+        mask_prob * all_sz / float(mask_length) + np.random.rand())
 
     all_num_mask = max(min_masks, all_num_mask)
 
@@ -206,9 +201,7 @@ def _compute_mask_indices(
             sz = all_sz - padding_mask[i].long().sum().item()
             num_mask = int(
                 # add a random number for probabilistic rounding
-                mask_prob * sz / float(mask_length)
-                + np.random.rand()
-            )
+                mask_prob * sz / float(mask_length) + np.random.rand())
             num_mask = max(min_masks, num_mask)
         else:
             sz = all_sz
@@ -224,7 +217,10 @@ def _compute_mask_indices(
             min_len = sz - num_mask - 1
 
         mask_idc = np.random.choice(sz - min_len, num_mask, replace=False)
-        mask_idc = np.asarray([mask_idc[j] + offset for j in range(len(mask_idc)) for offset in range(lengths[j])])
+        mask_idc = np.asarray([
+            mask_idc[j] + offset for j in range(len(mask_idc))
+            for offset in range(lengths[j])
+        ])
         mask_idcs.append(np.unique(mask_idc[mask_idc < sz]))
 
     min_len = min([len(m) for m in mask_idcs])
@@ -256,6 +252,7 @@ class Wav2Vec2NoLayerNormConvLayer(nn.Layer):
         hidden_states = self.activation(hidden_states)
         return hidden_states
 
+
 class Wav2Vec2GroupNormConvLayer(nn.Layer):
     def __init__(self, config, layer_id=0):
         super().__init__()
@@ -271,7 +268,8 @@ class Wav2Vec2GroupNormConvLayer(nn.Layer):
         )
         self.activation = ACT2FN[config.feat_extract_activation]
         # , affine=True ??
-        self.layer_norm = nn.GroupNorm(num_groups=self.out_conv_dim, num_channels=self.out_conv_dim)
+        self.layer_norm = nn.GroupNorm(num_groups=self.out_conv_dim,
+                                       num_channels=self.out_conv_dim)
 
     def forward(self, hidden_states):
         hidden_states = self.conv(hidden_states)
@@ -290,18 +288,18 @@ class Wav2Vec2PositionalConvEmbedding(nn.Layer):
             padding=config.num_conv_pos_embeddings // 2,
             groups=config.num_conv_pos_embedding_groups,
         )
-       # self.conv = nn.utils.weight_norm(self.conv, name="weight", axis=2)
+        # self.conv = nn.utils.weight_norm(self.conv, name="weight", axis=2)
         self.padding = Wav2Vec2SamePadLayer(config.num_conv_pos_embeddings)
         self.activation = ACT2FN[config.feat_extract_activation]
 
     def forward(self, hidden_states):
-        hidden_states = hidden_states.transpose((0,2, 1))
+        hidden_states = hidden_states.transpose((0, 2, 1))
 
         hidden_states = self.conv(hidden_states)
         hidden_states = self.padding(hidden_states)
         hidden_states = self.activation(hidden_states)
 
-        hidden_states = hidden_states.transpose((0,2, 1))
+        hidden_states = hidden_states.transpose((0, 2, 1))
         return hidden_states
 
 
@@ -312,24 +310,24 @@ class Wav2Vec2SamePadLayer(nn.Layer):
 
     def forward(self, hidden_states):
         if self.num_pad_remove > 0:
-            hidden_states = hidden_states[:, :, : -self.num_pad_remove]
+            hidden_states = hidden_states[:, :, :-self.num_pad_remove]
         return hidden_states
 
 
 class Wav2Vec2FeatureExtractor(nn.Layer):
     """Construct the featurs from raw audio waveform"""
-
     def __init__(self, config):
         super().__init__()
 
         if config.feat_extract_norm == "group":
-            print('group')
             conv_layers = [Wav2Vec2GroupNormConvLayer(config, layer_id=0)] + [
-                Wav2Vec2NoLayerNormConvLayer(config, layer_id=i + 1) for i in range(config.num_feat_extract_layers - 1)
+                Wav2Vec2NoLayerNormConvLayer(config, layer_id=i + 1)
+                for i in range(config.num_feat_extract_layers - 1)
             ]
         elif config.feat_extract_norm == "layer":
             conv_layers = [
-                Wav2Vec2LayerNormConvLayer(config, layer_id=i) for i in range(config.num_feat_extract_layers)
+                Wav2Vec2LayerNormConvLayer(config, layer_id=i)
+                for i in range(config.num_feat_extract_layers)
             ]
         else:
             raise ValueError(
@@ -344,17 +342,47 @@ class Wav2Vec2FeatureExtractor(nn.Layer):
     def forward(self, input_values):
         #hidden_states = input_values[:, None]
         hidden_states = input_values.unsqueeze(1)
-        
+
         for conv_layer in self.conv_layers:
             hidden_states = conv_layer(hidden_states)
 
         return hidden_states
 
 
+class Wav2Vec2LayerNormConvLayer(nn.Layer):
+    def __init__(self, config, layer_id=0):
+        super().__init__()
+        self.in_conv_dim = config.conv_dim[layer_id] if layer_id > 0 else 1
+        self.out_conv_dim = config.conv_dim[layer_id]
+
+        self.conv = nn.Conv1D(
+            self.in_conv_dim,
+            self.out_conv_dim,
+            kernel_size=config.conv_kernel[layer_id],
+            stride=config.conv_stride[layer_id],
+            bias_attr=config.conv_bias,
+        )
+        self.layer_norm = nn.LayerNorm(self.out_conv_dim,
+                                       weight_attr=True,
+                                       bias_attr=True)
+        self.activation = ACT2FN[config.feat_extract_activation]
+
+    def forward(self, hidden_states):
+        hidden_states = self.conv(hidden_states)
+        #import pdb;pdb.set_trace()
+        hidden_states = hidden_states.transpose((0, 2, 1))
+        hidden_states = self.layer_norm(hidden_states)
+        hidden_states = hidden_states.transpose((0, 2, 1))
+
+        hidden_states = self.activation(hidden_states)
+        return hidden_states
+
+
 class Wav2Vec2FeatureProjection(nn.Layer):
     def __init__(self, config):
         super().__init__()
-        self.layer_norm = nn.LayerNorm(config.conv_dim[-1], epsilon=config.layer_norm_eps)
+        self.layer_norm = nn.LayerNorm(config.conv_dim[-1],
+                                       epsilon=config.layer_norm_eps)
         self.projection = nn.Linear(config.conv_dim[-1], config.hidden_size)
         self.dropout = nn.Dropout(config.feat_proj_dropout)
 
@@ -384,7 +412,7 @@ class Wav2Vec2Attention(nn.Layer):
         assert (
             self.head_dim * num_heads == self.embed_dim
         ), f"embed_dim must be divisible by num_heads (got `embed_dim`: {self.embed_dim} and `num_heads`: {num_heads})."
-        self.scaling = self.head_dim ** -0.5
+        self.scaling = self.head_dim**-0.5
         self.is_decoder = is_decoder
 
         self.k_proj = nn.Linear(embed_dim, embed_dim, bias_attr=bias)
@@ -393,7 +421,9 @@ class Wav2Vec2Attention(nn.Layer):
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias_attr=bias)
 
     def _shape(self, tensor: paddle.Tensor, seq_len: int, bsz: int):
-        return tensor.reshape((bsz, seq_len, self.num_heads, self.head_dim)).transpose((0,2, 1,3))#?.contiguous()
+        return tensor.reshape(
+            (bsz, seq_len, self.num_heads, self.head_dim)).transpose(
+                (0, 2, 1, 3))  #?.contiguous()
 
     def forward(
         self,
@@ -403,7 +433,8 @@ class Wav2Vec2Attention(nn.Layer):
         attention_mask: Optional[paddle.Tensor] = None,
         layer_head_mask: Optional[paddle.Tensor] = None,
         output_attentions: bool = False,
-    ) -> Tuple[paddle.Tensor, Optional[paddle.Tensor], Optional[Tuple[paddle.Tensor]]]:
+    ) -> Tuple[paddle.Tensor, Optional[paddle.Tensor],
+               Optional[Tuple[paddle.Tensor]]]:
         """Input shape: Batch x Time x Channel"""
 
         # if key_value_states are provided this layer is used as a cross-attention layer
@@ -427,7 +458,8 @@ class Wav2Vec2Attention(nn.Layer):
             key_states = self._shape(self.k_proj(hidden_states), -1, bsz)
             value_states = self._shape(self.v_proj(hidden_states), -1, bsz)
             key_states = paddle.concat([past_key_value[0], key_states], axis=2)
-            value_states = paddle.concat([past_key_value[1], value_states], axis=2)
+            value_states = paddle.concat([past_key_value[1], value_states],
+                                         axis=2)
         else:
             # self_attention
             key_states = self._shape(self.k_proj(hidden_states), -1, bsz)
@@ -444,12 +476,14 @@ class Wav2Vec2Attention(nn.Layer):
             past_key_value = (key_states, value_states)
 
         proj_shape = (bsz * self.num_heads, -1, self.head_dim)
-        query_states = self._shape(query_states, tgt_len, bsz).reshape(proj_shape)
+        query_states = self._shape(query_states, tgt_len,
+                                   bsz).reshape(proj_shape)
         key_states = key_states.reshape(proj_shape)
         value_states = value_states.reshape(proj_shape)
 
         src_len = key_states.shape[1]
-        attn_weights = paddle.bmm(query_states, key_states.transpose((0,2, 1)))
+        attn_weights = paddle.bmm(query_states, key_states.transpose(
+            (0, 2, 1)))
 
         assert attn_weights.shape == [
             bsz * self.num_heads,
@@ -464,8 +498,10 @@ class Wav2Vec2Attention(nn.Layer):
                 tgt_len,
                 src_len,
             ], f"Attention mask should be of size {(bsz, 1, tgt_len, src_len)}, but is {attention_mask.shape}"
-            attn_weights = attn_weights.reshape((bsz, self.num_heads, tgt_len, src_len)) + attention_mask
-            attn_weights = attn_weights.reshape((bsz * self.num_heads, tgt_len, src_len))
+            attn_weights = attn_weights.reshape(
+                (bsz, self.num_heads, tgt_len, src_len)) + attention_mask
+            attn_weights = attn_weights.reshape(
+                (bsz * self.num_heads, tgt_len, src_len))
 
         attn_weights = F.softmax(attn_weights, axis=-1)
 
@@ -473,20 +509,27 @@ class Wav2Vec2Attention(nn.Layer):
             assert layer_head_mask.size() == (
                 self.num_heads,
             ), f"Head mask for a single layer should be of size {(self.num_heads,)}, but is {layer_head_mask.size()}"
-            attn_weights = layer_head_mask.reshape((1, -1, 1, 1)) * attn_weights.reshape((bsz, self.num_heads, tgt_len, src_len))
-            attn_weights = attn_weights.reshape((bsz * self.num_heads, tgt_len, src_len))
+            attn_weights = layer_head_mask.reshape(
+                (1, -1, 1, 1)) * attn_weights.reshape(
+                    (bsz, self.num_heads, tgt_len, src_len))
+            attn_weights = attn_weights.reshape(
+                (bsz * self.num_heads, tgt_len, src_len))
 
         if output_attentions:
             # this operation is a bit akward, but it's required to
             # make sure that attn_weights keeps its gradient.
             # In order to do so, attn_weights have to reshaped
             # twice and have to be reused in the following
-            attn_weights_reshaped = attn_weights.reshape((bsz, self.num_heads, tgt_len, src_len))
-            attn_weights = attn_weights_reshaped.reshape((bsz * self.num_heads, tgt_len, src_len))
+            attn_weights_reshaped = attn_weights.reshape(
+                (bsz, self.num_heads, tgt_len, src_len))
+            attn_weights = attn_weights_reshaped.reshape(
+                (bsz * self.num_heads, tgt_len, src_len))
         else:
             attn_weights_reshaped = None
 
-        attn_probs = F.dropout(attn_weights, p=self.dropout, training=self.training)
+        attn_probs = F.dropout(attn_weights,
+                               p=self.dropout,
+                               training=self.training)
 
         attn_output = paddle.bmm(attn_probs, value_states)
 
@@ -496,11 +539,9 @@ class Wav2Vec2Attention(nn.Layer):
             self.head_dim,
         ], f"`attn_output` should be of size {(bsz, self.num_heads, tgt_len, self.head_dim)}, but is {attn_output.size()}"
 
-        attn_output = (
-            attn_output.reshape((bsz, self.num_heads, tgt_len, self.head_dim))
-            .transpose((0,2,1,3))
-            .reshape((bsz, tgt_len, embed_dim))
-        )
+        attn_output = (attn_output.reshape(
+            (bsz, self.num_heads, tgt_len, self.head_dim)).transpose(
+                (0, 2, 1, 3)).reshape((bsz, tgt_len, embed_dim)))
 
         attn_output = self.out_proj(attn_output)
 
@@ -512,13 +553,15 @@ class Wav2Vec2FeedForward(nn.Layer):
         super().__init__()
         self.intermediate_dropout = nn.Dropout(config.activation_dropout)
 
-        self.intermediate_dense = nn.Linear(config.hidden_size, config.intermediate_size)
+        self.intermediate_dense = nn.Linear(config.hidden_size,
+                                            config.intermediate_size)
         if isinstance(config.hidden_act, str):
             self.intermediate_act_fn = ACT2FN[config.hidden_act]
         else:
             self.intermediate_act_fn = config.hidden_act
 
-        self.output_dense = nn.Linear(config.intermediate_size, config.hidden_size)
+        self.output_dense = nn.Linear(config.intermediate_size,
+                                      config.hidden_size)
         self.output_dropout = nn.Dropout(config.hidden_dropout)
 
     def forward(self, hidden_states):
@@ -549,15 +592,21 @@ class Wav2Vec2EncoderLayer(nn.Layer):
             is_decoder=False,
         )
         self.dropout = nn.Dropout(config.hidden_dropout)
-        self.layer_norm = nn.LayerNorm(config.hidden_size, epsilon=config.layer_norm_eps)
+        self.layer_norm = nn.LayerNorm(config.hidden_size,
+                                       epsilon=config.layer_norm_eps)
         self.feed_forward = Wav2Vec2FeedForward(config)
-        self.final_layer_norm = nn.LayerNorm(config.hidden_size, epsilon=config.layer_norm_eps)
+        self.final_layer_norm = nn.LayerNorm(config.hidden_size,
+                                             epsilon=config.layer_norm_eps)
 
-    def forward(self, hidden_states, attention_mask=None, output_attentions=False):
+    def forward(self,
+                hidden_states,
+                attention_mask=None,
+                output_attentions=False):
         attn_residual = hidden_states
         hidden_states, attn_weights, _ = self.attention(
-            hidden_states, attention_mask=attention_mask, output_attentions=output_attentions
-        )
+            hidden_states,
+            attention_mask=attention_mask,
+            output_attentions=output_attentions)
         hidden_states = self.dropout(hidden_states)
         hidden_states = attn_residual + hidden_states
 
@@ -565,10 +614,10 @@ class Wav2Vec2EncoderLayer(nn.Layer):
         hidden_states = hidden_states + self.feed_forward(hidden_states)
         hidden_states = self.final_layer_norm(hidden_states)
 
-        outputs = (hidden_states,)
+        outputs = (hidden_states, )
 
         if output_attentions:
-            outputs += (attn_weights,)
+            outputs += (attn_weights, )
 
         return outputs
 
@@ -578,9 +627,13 @@ class Wav2Vec2Encoder(nn.Layer):
         super().__init__()
         self.config = config
         self.pos_conv_embed = Wav2Vec2PositionalConvEmbedding(config)
-        self.layer_norm = nn.LayerNorm(config.hidden_size, epsilon=config.layer_norm_eps)
+        self.layer_norm = nn.LayerNorm(config.hidden_size,
+                                       epsilon=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout)
-        self.layers = nn.LayerList([Wav2Vec2EncoderLayer(config) for _ in range(config.num_hidden_layers)])
+        self.layers = nn.LayerList([
+            Wav2Vec2EncoderLayer(config)
+            for _ in range(config.num_hidden_layers)
+        ])
 
     def forward(
         self,
@@ -590,9 +643,10 @@ class Wav2Vec2Encoder(nn.Layer):
         output_hidden_states=False,
         return_dict=True,
     ):
+
         assert output_hidden_states is False
         assert output_attentions is False
-       # all_hidden_states = () if output_hidden_states else None
+        # all_hidden_states = () if output_hidden_states else None
         all_self_attentions = () if output_attentions else None
 
         if attention_mask is not None:
@@ -600,38 +654,39 @@ class Wav2Vec2Encoder(nn.Layer):
             hidden_states[~attention_mask] = 0.0
 
             # extend attention_mask
-            attention_mask = (1.0 - attention_mask[:, None, None, :].to(dtype=hidden_states.dtype)) * -10000.0
-            attention_mask = attention_mask.expand(
-                attention_mask.shape[0], 1, attention_mask.shape[-1], attention_mask.shape[-1]
-            )
+            attention_mask = (1.0 - attention_mask[:, None, None, :].to(
+                dtype=hidden_states.dtype)) * -10000.0
+            attention_mask = attention_mask.expand(attention_mask.shape[0], 1,
+                                                   attention_mask.shape[-1],
+                                                   attention_mask.shape[-1])
         position_embeddings = self.pos_conv_embed(hidden_states)
         hidden_states = hidden_states + position_embeddings
         hidden_states = self.layer_norm(hidden_states)
         hidden_states = self.dropout(hidden_states)
 
         for layer in self.layers:
-          #  if output_hidden_states:
-                #all_hidden_states = all_hidden_states + (hidden_states,)
+            #  if output_hidden_states:
+            #all_hidden_states = all_hidden_states + (hidden_states,)
 
             # add LayerDrop (see https://arxiv.org/abs/1909.11556 for description)
             dropout_probability = np.random.uniform(0, 1)
-           
-            layer_outputs = layer(
-                hidden_states, attention_mask=attention_mask, output_attentions=output_attentions)
+
+            layer_outputs = layer(hidden_states,
+                                  attention_mask=attention_mask,
+                                  output_attentions=output_attentions)
             hidden_states = layer_outputs[0]
 
-          #  if output_attentions:
-              #  all_self_attentions = all_self_attentions + (layer_outputs[1],)
+        #  if output_attentions:
+        #  all_self_attentions = all_self_attentions + (layer_outputs[1],)
 
+    #   if not return_dict:
+    #return tuple(v for v in [hidden_states, all_hidden_states, all_self_attentions] if v is not None)
 
-     #   if not return_dict:
-            #return tuple(v for v in [hidden_states, all_hidden_states, all_self_attentions] if v is not None)
         return BaseModelOutput(
             last_hidden_state=hidden_states,
             hidden_states=None,
             attentions=None,
         )
-
 
 
 class Wav2Vec2PreTrainedModel(nn.Layer):
@@ -640,7 +695,6 @@ class Wav2Vec2PreTrainedModel(nn.Layer):
     models.
     """
 
-    config_class = Wav2Vec2Config
     base_model_prefix = "wav2vec2"
     _keys_to_ignore_on_load_missing = [r"position_ids"]
 
@@ -649,30 +703,149 @@ class Wav2Vec2PreTrainedModel(nn.Layer):
         if isinstance(module, nn.Linear):
             # Slightly different from the TF version which uses truncated_normal for initialization
             # cf https://github.com/pytorch/pytorch/pull/5617
-            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
+            module.weight.data.normal_(mean=0.0,
+                                       std=self.config.initializer_range)
         elif isinstance(module, (nn.LayerNorm, nn.GroupNorm)):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
         elif isinstance(module, nn.Conv1D):
             paddle.nn.initializer.KaimingNormal(module.weight.data)
-        if isinstance(module, (nn.Linear, nn.Conv1D)) and module.bias is not None:
+        if isinstance(module,
+                      (nn.Linear, nn.Conv1D)) and module.bias is not None:
             module.bias.data.zero_()
-    def init_weights(self,):
+
+    def init_weights(self, ):
         self.apply(self._init_weights)
+
     def _get_feat_extract_output_lengths(self, input_lengths: paddle.Tensor):
         """
         Computes the output length of the convolutional layers
         """
-
         def _conv_out_length(input_length, kernel_size, stride):
             # 1D convolutional layer output length formula taken
             # from https://pytorch.org/docs/stable/generated/torch.nn.Conv1D.html
             return (input_length - kernel_size) // stride + 1
 
-        for kernel_size, stride in zip(self.config.conv_kernel, self.config.conv_stride):
-            input_lengths = _conv_out_length(input_lengths, kernel_size, stride)
+        for kernel_size, stride in zip(self.config.conv_kernel,
+                                       self.config.conv_stride):
+            input_lengths = _conv_out_length(input_lengths, kernel_size,
+                                             stride)
 
         return input_lengths.astype('int64')
+
+
+class Wav2Vec2EncoderLayerStableLayerNorm(nn.Layer):
+    def __init__(self, config):
+        super().__init__()
+        self.attention = Wav2Vec2Attention(
+            embed_dim=config.hidden_size,
+            num_heads=config.num_attention_heads,
+            dropout=config.attention_dropout,
+            is_decoder=False,
+        )
+        self.dropout = nn.Dropout(config.hidden_dropout)
+        self.layer_norm = nn.LayerNorm(config.hidden_size,
+                                       epsilon=config.layer_norm_eps)
+        self.feed_forward = Wav2Vec2FeedForward(config)
+        self.final_layer_norm = nn.LayerNorm(config.hidden_size,
+                                             epsilon=config.layer_norm_eps)
+
+    def forward(self,
+                hidden_states,
+                attention_mask=None,
+                output_attentions=False):
+        attn_residual = hidden_states
+        hidden_states = self.layer_norm(hidden_states)
+        hidden_states, attn_weights, _ = self.attention(
+            hidden_states,
+            attention_mask=attention_mask,
+            output_attentions=output_attentions)
+        hidden_states = self.dropout(hidden_states)
+        hidden_states = attn_residual + hidden_states
+        hidden_states = hidden_states + self.feed_forward(
+            self.final_layer_norm(hidden_states))
+
+        outputs = (hidden_states, )
+
+        if output_attentions:
+            outputs += (attn_weights, )
+
+        return outputs
+
+
+class Wav2Vec2EncoderStableLayerNorm(nn.Layer):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.pos_conv_embed = Wav2Vec2PositionalConvEmbedding(config)
+        self.layer_norm = nn.LayerNorm(config.hidden_size,
+                                       epsilon=config.layer_norm_eps)
+        self.dropout = nn.Dropout(config.hidden_dropout)
+        self.layers = nn.LayerList([
+            Wav2Vec2EncoderLayerStableLayerNorm(config)
+            for _ in range(config.num_hidden_layers)
+        ])
+
+    def forward(
+        self,
+        hidden_states,
+        attention_mask=None,
+        output_attentions=False,
+        output_hidden_states=False,
+        return_dict=True,
+    ):
+        all_hidden_states = () if output_hidden_states else None
+        all_self_attentions = () if output_attentions else None
+
+        if attention_mask is not None:
+            # make sure padded tokens are not attended to
+            hidden_states[~attention_mask] = 0
+
+            # extend attention_mask
+            attention_mask = (1.0 - attention_mask[:, None, None, :].to(
+                dtype=hidden_states.dtype)) * -10000.0
+            attention_mask = attention_mask.expand(attention_mask.shape[0], 1,
+                                                   attention_mask.shape[-1],
+                                                   attention_mask.shape[-1])
+
+        position_embeddings = self.pos_conv_embed(hidden_states)
+        hidden_states = hidden_states + position_embeddings
+        hidden_states = self.dropout(hidden_states)
+
+        for layer in self.layers:
+            if output_hidden_states:
+                all_hidden_states = all_hidden_states + (hidden_states, )
+
+            # add LayerDrop (see https://arxiv.org/abs/1909.11556 for description)
+            dropout_probability = np.random.uniform(0, 1)
+            if self.training and (dropout_probability <
+                                  self.config.layerdrop):  # skip the layer
+                layer_outputs = (None, None)
+            else:
+                layer_outputs = layer(hidden_states,
+                                      attention_mask=attention_mask,
+                                      output_attentions=output_attentions)
+                hidden_states = layer_outputs[0]
+
+            if output_attentions:
+                all_self_attentions = all_self_attentions + (
+                    layer_outputs[1], )
+
+        hidden_states = self.layer_norm(hidden_states)
+
+        if output_hidden_states:
+            all_hidden_states = all_hidden_states + (hidden_states, )
+
+        if not return_dict:
+            return tuple(
+                v for v in
+                [hidden_states, all_hidden_states, all_self_attentions]
+                if v is not None)
+        return BaseModelOutput(
+            last_hidden_state=hidden_states,
+            hidden_states=all_hidden_states,
+            attentions=all_self_attentions,
+        )
 
 
 class Wav2Vec2Model(Wav2Vec2PreTrainedModel):
@@ -681,13 +854,15 @@ class Wav2Vec2Model(Wav2Vec2PreTrainedModel):
         self.config = config
         self.feature_extractor = Wav2Vec2FeatureExtractor(config)
         self.feature_projection = Wav2Vec2FeatureProjection(config)
-        #self.masked_spec_embed = nn.Parameter(paddle.Tensor(config.hidden_size).uniform_())
-        self.masked_spec_embed = paddle.create_parameter((config.hidden_size,),'float32')
+        self.masked_spec_embed = paddle.create_parameter(
+            (config.hidden_size, ), 'float32')
 
-        self.encoder = Wav2Vec2Encoder(config)
+        if config.do_stable_layer_norm:
+            self.encoder = Wav2Vec2EncoderStableLayerNorm(config)
+        else:
+            self.encoder = Wav2Vec2Encoder(config)
 
-       # self.init_weights()
-         
+    # self.init_weights()
 
     def forward(
         self,
@@ -697,31 +872,29 @@ class Wav2Vec2Model(Wav2Vec2PreTrainedModel):
         output_hidden_states=None,
         return_dict=None,
     ):
-        
-        output_attentions =  False#output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = False# (
-           # output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+
+        output_attentions = False  #output_attentions if output_attentions is not None else self.config.output_attentions
+        output_hidden_states = False  # (
+        # output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
         #)
-        return_dict = True# return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = True  # return_dict if return_dict is not None else self.config.use_return_dict
 
         hidden_states = self.feature_extractor(input_values)
-        print(hidden_states.shape)
-        hidden_states = hidden_states.transpose((0,2,1))
-        print(hidden_states.shape)
+        hidden_states = hidden_states.transpose((0, 2, 1))
 
         if attention_mask is not None:
             # compute real output lengths according to convolution formula
-            output_lengths = self._get_feat_extract_output_lengths(attention_mask.sum(-1))
+            output_lengths = self._get_feat_extract_output_lengths(
+                attention_mask.sum(-1))
 
-            attention_mask = paddle.zeros(
-                hidden_states.shape[:2], dtype=hidden_states.dtype
-            )
+            attention_mask = paddle.zeros(hidden_states.shape[:2],
+                                          dtype=hidden_states.dtype)
             # these two operations makes sure that all values
             # before the output lengths indices are attended to
-            attention_mask[
-                (paddle.arange(0,end=attention_mask.shape[0]), output_lengths - 1)
-            ] = 1
-            attention_mask = attention_mask.flip([-1]).cumsum(-1).flip([-1]).bool()
+            attention_mask[(paddle.arange(0, end=attention_mask.shape[0]),
+                            output_lengths - 1)] = 1
+            attention_mask = attention_mask.flip([-1]).cumsum(-1).flip(
+                [-1]).bool()
 
         hidden_states = self.feature_projection(hidden_states)
 
@@ -737,7 +910,9 @@ class Wav2Vec2Model(Wav2Vec2PreTrainedModel):
                     attention_mask=attention_mask,
                     min_masks=2,
                 )
-                hidden_states[paddle.to_tensor(mask_time_indices)] = self.masked_spec_embed.to(hidden_states.dtype)
+                hidden_states[paddle.to_tensor(
+                    mask_time_indices)] = self.masked_spec_embed.to(
+                        hidden_states.dtype)
 
             # apply SpecAugment along feature axis
             if self.config.mask_feature_prob > 0:
@@ -747,8 +922,8 @@ class Wav2Vec2Model(Wav2Vec2PreTrainedModel):
                     self.config.mask_feature_length,
                 )
                 mask_feature_indices = paddle.to_tensor(mask_feature_indices)
-                hidden_states[mask_feature_indices[:, None].expand(-1, sequence_length, -1)] = 0
-
+                hidden_states[mask_feature_indices[:, None].expand(
+                    -1, sequence_length, -1)] = 0
         encoder_outputs = self.encoder(
             hidden_states,
             attention_mask=attention_mask,
@@ -760,7 +935,7 @@ class Wav2Vec2Model(Wav2Vec2PreTrainedModel):
         hidden_states = encoder_outputs[0]
 
         if not return_dict:
-            return (hidden_states,) + encoder_outputs[1:]
+            return (hidden_states, ) + encoder_outputs[1:]
 
         return BaseModelOutput(
             last_hidden_state=hidden_states,
@@ -769,17 +944,57 @@ class Wav2Vec2Model(Wav2Vec2PreTrainedModel):
         )
 
 
+CONFIG_NAMES = [
+    'wav2vec2-base-960h',
+    'wav2vec2-large-960h',
+    'wav2vec2-large-960h-lv60',
+    'wav2vec2-large-960h-lv60-self',
+]
+URL_BASE = 'https://bj.bcebos.com/paddleaudio/models/wav2vec2/'
+AUDIO_URL = 'https://bj.bcebos.com/paddleaudio/test/data/librispeech/sample1.flac'
+TEXT_URL = 'https://bj.bcebos.com/paddleaudio/test/data/librispeech/sample1.txt'
+
+from paddle.utils import download
+
 
 class Wav2Vec2ForCTC(Wav2Vec2PreTrainedModel):
-    def __init__(self, config):
+    def __init__(self, config_name, pretrained=True):
         super().__init__()
+
+        assert config_name in CONFIG_NAMES, f'input config {config_name} incorrect, available configs: {CONFIG_NAMES}'
+
+        config_url = URL_BASE + f'config/{config_name}.json'
+        config_path = download.get_weights_path_from_url(config_url)
+        config = PretrainedConfig.from_pretrained(config_path)
 
         self.wav2vec2 = Wav2Vec2Model(config)
         self.dropout = nn.Dropout(config.final_dropout)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size)
 
-        #self.init_weights()
         self.config = config
+        if pretrained:
+            weight_url = URL_BASE + f'weights/{config_name}.pdparam'
+            weight_path = download.get_weights_path_from_url(weight_url)
+            state_dict = paddle.load(weight_path)
+            self.load_dict(state_dict)
+            self.eval()
+
+    @classmethod
+    def from_pretrained(cls, config_name):
+
+        assert config_name in CONFIG_NAMES, f'input config {config_name} incorrect, available configs: {CONFIG_NAMES}'
+        weight_url = URL_BASE + f'weights/{config_name}.pdparam'
+        weight_path = download.get_weights_path_from_url(weight_url)
+
+        config_url = URL_BASE + f'config/{config_name}.json'
+        config_path = download.get_weights_path_from_url(config_url)
+
+        config = PretrainedConfig.from_pretrained(config_path)
+        model = cls(config)
+        state_dict = paddle.load(weight_path)
+        model.load_dict(state_dict)
+        model.eval()
+        return model
 
     def freeze_feature_extractor(self):
         """
@@ -812,18 +1027,3 @@ class Wav2Vec2ForCTC(Wav2Vec2PreTrainedModel):
         logits = self.lm_head(hidden_states)
 
         return logits
-
-
-
-
-
-#     sd = torch.load('model.pth')
-#     model.load_state_dict(sd)
-#     model = model.cuda()
-#     model.eval()
-#     input_values = torch.load('input.pt')
-#     with torch.no_grad():
-#         logits = model(input_values.cuda()).logits.cpu()
-#     print(logits)
-#     print(torch.mean(logits))
-#     assert np.abs(-5.281228065490723 - float(torch.mean(logits))) < 1e-5

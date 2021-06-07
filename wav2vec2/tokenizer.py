@@ -1,6 +1,14 @@
-from itertools import groupby
-from typing import Optional, List, Dict, Tuple,Union
 import json
+from itertools import groupby
+from typing import Dict, List, Optional, Tuple, Union
+
+from paddle.utils import download
+from paddleaudio.utils.log import Logger
+
+URL_BASE = 'https://bj.bcebos.com/paddleaudio/models/wav2vec2/'
+logger = Logger(__file__)
+
+
 class Wav2Vec2Tokenizer():
     """
     Constructs a Wav2Vec2 tokenizer.
@@ -49,19 +57,19 @@ class Wav2Vec2Tokenizer():
     vocab_files_names = 'facebook/wav2vec2-base-960h'
     model_input_names = ["input_values", "attention_mask"]
 
-    def __init__(
-        self,
-        vocab_file,
-        bos_token="<s>",
-        eos_token="</s>",
-        unk_token="<unk>",
-        pad_token="<pad>",
-        word_delimiter_token="|",
-        do_lower_case=True,
-       
-        
-    ):
-        
+    def __init__(self,
+                 vocab_file=None,
+                 bos_token="<s>",
+                 eos_token="</s>",
+                 unk_token="<unk>",
+                 pad_token="<pad>",
+                 word_delimiter_token="|",
+                 do_lower_case=True,
+                 verbose=False):
+        if vocab_file is None:
+            vocab_url = URL_BASE + 'config/vocab.json'
+            vocab_file = download.get_weights_path_from_url(vocab_url)
+
         self._bos_token = bos_token
         self._eos_token = eos_token
         self._unk_token = unk_token
@@ -71,11 +79,11 @@ class Wav2Vec2Tokenizer():
         self._mask_token = None
         self._pad_token_type_id = 0
         self._word_delimiter_token = word_delimiter_token
-        
-        self.verbose = False
+
+        self.verbose = verbose
 
         self._additional_special_tokens = []
-        
+
         self.added_tokens_encoder: Dict[str, int] = {}
         self.added_tokens_decoder: Dict[int, str] = {}
 
@@ -83,7 +91,7 @@ class Wav2Vec2Tokenizer():
 
         with open(vocab_file, encoding="utf-8") as vocab_handle:
             self.encoder = json.load(vocab_handle)
-            
+
         self.decoder = {v: k for k, v in self.encoder.items()}
 
     @property
@@ -159,8 +167,6 @@ class Wav2Vec2Tokenizer():
             return None
         return str(self._mask_token)
 
-    
-    
     @bos_token.setter
     def bos_token(self, value):
         self._bos_token = value
@@ -188,7 +194,7 @@ class Wav2Vec2Tokenizer():
     @mask_token.setter
     def mask_token(self, value):
         self._mask_token = value
-        
+
     @property
     def additional_special_tokens(self) -> List[str]:
         """
@@ -196,16 +202,15 @@ class Wav2Vec2Tokenizer():
         been set.
         """
         if self._additional_special_tokens is None and self.verbose:
-            logger.error("Using additional_special_tokens, but it is not set yet.")
+            logger.error(
+                "Using additional_special_tokens, but it is not set yet.")
             return None
         return [str(tok) for tok in self._additional_special_tokens]
-
 
     @additional_special_tokens.setter
     def additional_special_tokens(self, value):
         self._additional_special_tokens = value
 
-        
     @property
     def unk_token(self) -> str:
         """
@@ -215,7 +220,7 @@ class Wav2Vec2Tokenizer():
             logger.error("Using unk_token, but it is not set yet.")
             return None
         return str(self._unk_token)
-    
+
     @property
     def word_delimiter_token(self) -> str:
         """
@@ -251,7 +256,7 @@ class Wav2Vec2Tokenizer():
         """Converts an index (integer) in a token (str) using the vocab."""
         result = self.decoder.get(index, self.unk_token)
         return result
-    
+
     @staticmethod
     def clean_up_tokenization(out_string: str) -> str:
         """
@@ -263,24 +268,17 @@ class Wav2Vec2Tokenizer():
         Returns:
             :obj:`str`: The cleaned-up string.
         """
-        out_string = (
-            out_string.replace(" .", ".")
-            .replace(" ?", "?")
-            .replace(" !", "!")
-            .replace(" ,", ",")
-            .replace(" ' ", "'")
-            .replace(" n't", "n't")
-            .replace(" 'm", "'m")
-            .replace(" 's", "'s")
-            .replace(" 've", "'ve")
-            .replace(" 're", "'re")
-        )
+        out_string = (out_string.replace(" .", ".").replace(" ?", "?").replace(
+            " !", "!").replace(" ,", ",").replace(" ' ", "'").replace(
+                " n't",
+                "n't").replace(" 'm", "'m").replace(" 's", "'s").replace(
+                    " 've", "'ve").replace(" 're", "'re"))
         return out_string
 
-    
     def convert_ids_to_tokens(
-        self, ids: Union[int, List[int]], skip_special_tokens: bool = False
-    ) -> Union[str, List[str]]:
+            self,
+            ids: Union[int, List[int]],
+            skip_special_tokens: bool = False) -> Union[str, List[str]]:
         """
         Converts a single index or a sequence of indices in a token or a sequence of tokens, using the vocabulary and
         added tokens.
@@ -309,7 +307,6 @@ class Wav2Vec2Tokenizer():
             else:
                 tokens.append(self._convert_id_to_token(index))
         return tokens
-    
 
     def convert_tokens_to_string(self, tokens: List[str]) -> str:
         """
@@ -319,29 +316,31 @@ class Wav2Vec2Tokenizer():
         grouped_tokens = [token_group[0] for token_group in groupby(tokens)]
 
         # filter self.pad_token which is used as CTC-blank token
-        filtered_tokens = list(filter(lambda token: token != self.pad_token, grouped_tokens))
+        filtered_tokens = list(
+            filter(lambda token: token != self.pad_token, grouped_tokens))
 
         # replace delimiter token
-        string = "".join([" " if token == self.word_delimiter_token else token for token in filtered_tokens]).strip()
+        string = "".join([
+            " " if token == self.word_delimiter_token else token
+            for token in filtered_tokens
+        ]).strip()
 
         if self.do_lower_case:
             string = string.lower()
         return string
 
-    def decode(
-        self,
-        token_ids: List[int],
-        skip_special_tokens: bool = False,
-        clean_up_tokenization_spaces: bool = True,
-        **kwargs
-    ) -> str:
+    def decode(self,
+               token_ids: List[int],
+               skip_special_tokens: bool = False,
+               clean_up_tokenization_spaces: bool = True,
+               **kwargs) -> str:
         """
         special _decode function is needed for Wav2Vec2Tokenizer because added tokens should be treated exactly the
         same as tokens of the base vocabulary and therefore the function `convert_tokens_to_string` has to be called on
         the whole token list and not individually on added tokens
         """
-        import pdb;pdb.set_trace()
-        filtered_tokens = self.convert_ids_to_tokens(token_ids, skip_special_tokens=skip_special_tokens)
+        filtered_tokens = self.convert_ids_to_tokens(
+            token_ids, skip_special_tokens=skip_special_tokens)
 
         result = []
         for token in filtered_tokens:
@@ -356,8 +355,9 @@ class Wav2Vec2Tokenizer():
             return clean_text
         else:
             return text
-        
-    def convert_tokens_to_ids(self, tokens: Union[str, List[str]]) -> Union[int, List[int]]:
+
+    def convert_tokens_to_ids(
+            self, tokens: Union[str, List[str]]) -> Union[int, List[int]]:
         """
         Converts a token string (or a sequence of tokens) in a single integer id (or a sequence of ids), using the
         vocabulary.
@@ -387,7 +387,6 @@ class Wav2Vec2Tokenizer():
             return self.added_tokens_encoder[token]
         return self._convert_token_to_id(token)
 
-    
     @property
     def all_special_ids(self) -> List[int]:
         """
@@ -397,15 +396,3 @@ class Wav2Vec2Tokenizer():
         all_toks = self.all_special_tokens
         all_ids = self.convert_tokens_to_ids(all_toks)
         return all_ids
-    def save_vocabulary(self, save_directory: str, filename_prefix: Optional[str] = None) -> Tuple[str]:
-        if not os.path.isdir(save_directory):
-            logger.error(f"Vocabulary path ({save_directory}) should be a directory")
-            return
-        vocab_file = os.path.join(
-            save_directory, (filename_prefix + "-" if filename_prefix else "") + VOCAB_FILES_NAMES["vocab_file"]
-        )
-
-        with open(vocab_file, "w", encoding="utf-8") as f:
-            f.write(json.dumps(self.encoder, ensure_ascii=False))
-
-        return (vocab_file,)
