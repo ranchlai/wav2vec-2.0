@@ -23,6 +23,8 @@ from typing import Any, Dict, Tuple, Union
 
 from paddleaudio.utils.log import logger
 
+__all__ = ['PretrainedConfig']
+
 
 class PretrainedConfig(object):
     r"""

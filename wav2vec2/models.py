@@ -14,18 +14,19 @@
 # limitations under the License.
 """ Wav2Vec2 model """
 
-import warnings
-from collections import OrderedDict, UserDict
-from contextlib import contextmanager
+from collections import OrderedDict
 from dataclasses import dataclass, fields
-from typing import Any, BinaryIO, Dict, List, Optional, Tuple, Union
+from typing import Any, Optional, Tuple
 
 import numpy as np
 import paddle
 import paddle.nn.functional as F
-from activations import ACT2FN
-from config_utils import PretrainedConfig
 from paddle import nn
+
+from .activations import ACT2FN
+from .config_utils import PretrainedConfig
+
+__all__ = ['Wav2Vec2ForCTC', 'Wav2Vec2Model']
 
 
 def is_tensor(x):

@@ -17,7 +17,6 @@ import math
 
 import paddle
 import paddle.nn.functional as F
-from packaging import version
 
 
 def _gelu_python(x):

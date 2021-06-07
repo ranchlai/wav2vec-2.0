@@ -17,11 +17,12 @@ import argparse
 import numpy as np
 import paddle
 import paddleaudio
-from models import Wav2Vec2ForCTC
 from paddle.utils import download
 from paddleaudio.backends.audio import normalize
 from paddleaudio.utils.log import Logger
-from tokenizer import Wav2Vec2Tokenizer
+
+from wav2vec2 import Wav2Vec2ForCTC
+from wav2vec2 import Wav2Vec2Tokenizer
 
 logger = Logger(__file__)
 
@@ -82,8 +83,11 @@ if __name__ == '__main__':
 
     with paddle.no_grad():
         logits = model(x)
+        
+    # get the token index prediction
     idx = paddle.argmax(logits, -1)
+    # decode to text 
     pred = tokenizer.decode(idx[0])
 
-    logger.info(f'pred: {pred}')
-    logger.info(f'true: {text}')
+    logger.info(f'pred==> {pred}')
+    logger.info(f'true==> {text}')
