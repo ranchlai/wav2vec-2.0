@@ -21,10 +21,9 @@ from config import Wav2Vec2Config
 from typing import Any, BinaryIO, Dict, List, Optional, Tuple, Union
 
 import numpy as np
-import torch
-import torch.nn.functional as F
-import torch.utils.checkpoint
-from torch import nn
+import paddle
+import paddle.nn.functional as F
+from paddle import nn
 
 from activations import ACT2FN
 
@@ -34,7 +33,7 @@ from dataclasses import fields
 
 def is_tensor(x):
 
-    return isinstance(x, torch.Tensor)
+    return isinstance(x, paddle.Tensor)
 
 
 
@@ -129,88 +128,29 @@ class ModelOutput(OrderedDict):
 
 @dataclass
 class BaseModelOutput(ModelOutput):
-    """
-    Base class for model's outputs, with potential hidden states and attentions.
-
-    Args:
-        last_hidden_state (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length, hidden_size)`):
-            Sequence of hidden-states at the output of the last layer of the model.
-        hidden_states (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``output_hidden_states=True`` is passed or when ``config.output_hidden_states=True``):
-            Tuple of :obj:`torch.FloatTensor` (one for the output of the embeddings + one for the output of each layer)
-            of shape :obj:`(batch_size, sequence_length, hidden_size)`.
-
-            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
-        attentions (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``output_attentions=True`` is passed or when ``config.output_attentions=True``):
-            Tuple of :obj:`torch.FloatTensor` (one for each layer) of shape :obj:`(batch_size, num_heads,
-            sequence_length, sequence_length)`.
-
-            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
-            heads.
-    """
-
-    last_hidden_state: torch.FloatTensor = None
-    hidden_states: Optional[Tuple[torch.FloatTensor]] = None
-    attentions: Optional[Tuple[torch.FloatTensor]] = None
+   
+    last_hidden_state: paddle.Tensor = None
+    hidden_states: Optional[Tuple[paddle.Tensor]] = None
+    attentions: Optional[Tuple[paddle.Tensor]] = None
         
 
 @dataclass
 class CausalLMOutput(BaseModelOutput):
-    """
-    Base class for causal language model (or autoregressive) outputs.
+   
 
-    Args:
-        loss (:obj:`torch.FloatTensor` of shape :obj:`(1,)`, `optional`, returned when :obj:`labels` is provided):
-            Language modeling loss (for next-token prediction).
-        logits (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length, config.vocab_size)`):
-            Prediction scores of the language modeling head (scores for each vocabulary token before SoftMax).
-        hidden_states (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``output_hidden_states=True`` is passed or when ``config.output_hidden_states=True``):
-            Tuple of :obj:`torch.FloatTensor` (one for the output of the embeddings + one for the output of each layer)
-            of shape :obj:`(batch_size, sequence_length, hidden_size)`.
-
-            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
-        attentions (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``output_attentions=True`` is passed or when ``config.output_attentions=True``):
-            Tuple of :obj:`torch.FloatTensor` (one for each layer) of shape :obj:`(batch_size, num_heads,
-            sequence_length, sequence_length)`.
-
-            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
-            heads.
-    """
-
-    loss: Optional[torch.FloatTensor] = None
-    logits: torch.FloatTensor = None
-    hidden_states: Optional[Tuple[torch.FloatTensor]] = None
-    attentions: Optional[Tuple[torch.FloatTensor]] = None
+    loss: Optional[paddle.Tensor] = None
+    logits: paddle.Tensor = None
+    hidden_states: Optional[Tuple[paddle.Tensor]] = None
+    attentions: Optional[Tuple[paddle.Tensor]] = None
 
 
 @dataclass
 class MaskedLMOutput(BaseModelOutput):
-    """
-    Base class for masked language models outputs.
-
-    Args:
-        loss (:obj:`torch.FloatTensor` of shape :obj:`(1,)`, `optional`, returned when :obj:`labels` is provided):
-            Masked language modeling (MLM) loss.
-        logits (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length, config.vocab_size)`):
-            Prediction scores of the language modeling head (scores for each vocabulary token before SoftMax).
-        hidden_states (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``output_hidden_states=True`` is passed or when ``config.output_hidden_states=True``):
-            Tuple of :obj:`torch.FloatTensor` (one for the output of the embeddings + one for the output of each layer)
-            of shape :obj:`(batch_size, sequence_length, hidden_size)`.
-
-            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
-        attentions (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``output_attentions=True`` is passed or when ``config.output_attentions=True``):
-            Tuple of :obj:`torch.FloatTensor` (one for each layer) of shape :obj:`(batch_size, num_heads,
-            sequence_length, sequence_length)`.
-
-            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
-            heads.
-    """
-
-    loss: Optional[torch.FloatTensor] = None
-    logits: torch.FloatTensor = None
-    hidden_states: Optional[Tuple[torch.FloatTensor]] = None
-    attentions: Optional[Tuple[torch.FloatTensor]] = None
-
-
+  
+    loss: Optional[paddle.Tensor] = None
+    logits: paddle.Tensor = None
+    hidden_states: Optional[Tuple[paddle.Tensor]] = None
+    attentions: Optional[Tuple[paddle.Tensor]] = None
 
 
 
@@ -229,7 +169,7 @@ def _compute_mask_indices(
     shape: Tuple[int, int],
     mask_prob: float,
     mask_length: int,
-    attention_mask: Optional[torch.Tensor] = None,
+    attention_mask: Optional[paddle.Tensor] = None,
     min_masks: int = 0,
 ) -> np.ndarray:
     """
@@ -296,18 +236,18 @@ def _compute_mask_indices(
     return mask
 
 
-class Wav2Vec2NoLayerNormConvLayer(nn.Module):
+class Wav2Vec2NoLayerNormConvLayer(nn.Layer):
     def __init__(self, config, layer_id=0):
         super().__init__()
         self.in_conv_dim = config.conv_dim[layer_id] if layer_id > 0 else 1
         self.out_conv_dim = config.conv_dim[layer_id]
 
-        self.conv = nn.Conv1d(
+        self.conv = nn.Conv1D(
             self.in_conv_dim,
             self.out_conv_dim,
             kernel_size=config.conv_kernel[layer_id],
             stride=config.conv_stride[layer_id],
-            bias=config.conv_bias,
+            bias_attr=config.conv_bias,
         )
         self.activation = ACT2FN[config.feat_extract_activation]
 
@@ -317,18 +257,18 @@ class Wav2Vec2NoLayerNormConvLayer(nn.Module):
         return hidden_states
 
 
-class Wav2Vec2LayerNormConvLayer(nn.Module):
+class Wav2Vec2LayerNormConvLayer(nn.Layer):
     def __init__(self, config, layer_id=0):
         super().__init__()
         self.in_conv_dim = config.conv_dim[layer_id] if layer_id > 0 else 1
         self.out_conv_dim = config.conv_dim[layer_id]
 
-        self.conv = nn.Conv1d(
+        self.conv = nn.Conv1D(
             self.in_conv_dim,
             self.out_conv_dim,
             kernel_size=config.conv_kernel[layer_id],
             stride=config.conv_stride[layer_id],
-            bias=config.conv_bias,
+            bias_attr=config.conv_bias,
         )
         self.layer_norm = nn.LayerNorm(self.out_conv_dim, elementwise_affine=True)
         self.activation = ACT2FN[config.feat_extract_activation]
@@ -344,22 +284,22 @@ class Wav2Vec2LayerNormConvLayer(nn.Module):
         return hidden_states
 
 
-class Wav2Vec2GroupNormConvLayer(nn.Module):
+class Wav2Vec2GroupNormConvLayer(nn.Layer):
     def __init__(self, config, layer_id=0):
         super().__init__()
         self.in_conv_dim = config.conv_dim[layer_id] if layer_id > 0 else 1
         self.out_conv_dim = config.conv_dim[layer_id]
 
-        self.conv = nn.Conv1d(
+        self.conv = nn.Conv1D(
             self.in_conv_dim,
             self.out_conv_dim,
             kernel_size=config.conv_kernel[layer_id],
             stride=config.conv_stride[layer_id],
-            bias=config.conv_bias,
+            bias_attr=config.conv_bias,
         )
         self.activation = ACT2FN[config.feat_extract_activation]
-
-        self.layer_norm = nn.GroupNorm(num_groups=self.out_conv_dim, num_channels=self.out_conv_dim, affine=True)
+        # , affine=True ??
+        self.layer_norm = nn.GroupNorm(num_groups=self.out_conv_dim, num_channels=self.out_conv_dim)
 
     def forward(self, hidden_states):
         hidden_states = self.conv(hidden_states)
@@ -368,17 +308,17 @@ class Wav2Vec2GroupNormConvLayer(nn.Module):
         return hidden_states
 
 
-class Wav2Vec2PositionalConvEmbedding(nn.Module):
+class Wav2Vec2PositionalConvEmbedding(nn.Layer):
     def __init__(self, config):
         super().__init__()
-        self.conv = nn.Conv1d(
+        self.conv = nn.Conv1D(
             config.hidden_size,
             config.hidden_size,
             kernel_size=config.num_conv_pos_embeddings,
             padding=config.num_conv_pos_embeddings // 2,
             groups=config.num_conv_pos_embedding_groups,
         )
-        self.conv = nn.utils.weight_norm(self.conv, name="weight", dim=2)
+       # self.conv = nn.utils.weight_norm(self.conv, name="weight", axis=2)
         self.padding = Wav2Vec2SamePadLayer(config.num_conv_pos_embeddings)
         self.activation = ACT2FN[config.feat_extract_activation]
 
@@ -393,7 +333,7 @@ class Wav2Vec2PositionalConvEmbedding(nn.Module):
         return hidden_states
 
 
-class Wav2Vec2SamePadLayer(nn.Module):
+class Wav2Vec2SamePadLayer(nn.Layer):
     def __init__(self, num_conv_pos_embeddings):
         super().__init__()
         self.num_pad_remove = 1 if num_conv_pos_embeddings % 2 == 0 else 0
@@ -404,7 +344,7 @@ class Wav2Vec2SamePadLayer(nn.Module):
         return hidden_states
 
 
-class Wav2Vec2FeatureExtractor(nn.Module):
+class Wav2Vec2FeatureExtractor(nn.Layer):
     """Construct the featurs from raw audio waveform"""
 
     def __init__(self, config):
@@ -422,14 +362,13 @@ class Wav2Vec2FeatureExtractor(nn.Module):
             raise ValueError(
                 f"`config.feat_extract_norm` is {config.feat_extract_norm}, but has to be one of ['group', 'layer']"
             )
-        self.conv_layers = nn.ModuleList(conv_layers)
+        self.conv_layers = nn.LayerList(conv_layers)
 
     def _freeze_parameters(self):
         for param in self.parameters():
             param.requires_grad = False
 
     def forward(self, input_values):
-        import pdb;pdb.set_trace()
         hidden_states = input_values[:, None]
         for conv_layer in self.conv_layers:
             hidden_states = conv_layer(hidden_states)
@@ -437,10 +376,10 @@ class Wav2Vec2FeatureExtractor(nn.Module):
         return hidden_states
 
 
-class Wav2Vec2FeatureProjection(nn.Module):
+class Wav2Vec2FeatureProjection(nn.Layer):
     def __init__(self, config):
         super().__init__()
-        self.layer_norm = nn.LayerNorm(config.conv_dim[-1], eps=config.layer_norm_eps)
+        self.layer_norm = nn.LayerNorm(config.conv_dim[-1], epsilon=config.layer_norm_eps)
         self.projection = nn.Linear(config.conv_dim[-1], config.hidden_size)
         self.dropout = nn.Dropout(config.feat_proj_dropout)
 
@@ -452,9 +391,8 @@ class Wav2Vec2FeatureProjection(nn.Module):
 
 
 # Copied from transformers.models.bart.modeling_bart.BartAttention with Bart->Wav2Vec2
-class Wav2Vec2Attention(nn.Module):
+class Wav2Vec2Attention(nn.Layer):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
-
     def __init__(
         self,
         embed_dim: int,
@@ -474,23 +412,23 @@ class Wav2Vec2Attention(nn.Module):
         self.scaling = self.head_dim ** -0.5
         self.is_decoder = is_decoder
 
-        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
-        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
-        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
-        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
+        self.k_proj = nn.Linear(embed_dim, embed_dim, bias_attr=bias)
+        self.v_proj = nn.Linear(embed_dim, embed_dim, bias_attr=bias)
+        self.q_proj = nn.Linear(embed_dim, embed_dim, bias_attr=bias)
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias_attr=bias)
 
-    def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
+    def _shape(self, tensor: paddle.Tensor, seq_len: int, bsz: int):
         return tensor.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
 
     def forward(
         self,
-        hidden_states: torch.Tensor,
-        key_value_states: Optional[torch.Tensor] = None,
-        past_key_value: Optional[Tuple[torch.Tensor]] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        layer_head_mask: Optional[torch.Tensor] = None,
+        hidden_states: paddle.Tensor,
+        key_value_states: Optional[paddle.Tensor] = None,
+        past_key_value: Optional[Tuple[paddle.Tensor]] = None,
+        attention_mask: Optional[paddle.Tensor] = None,
+        layer_head_mask: Optional[paddle.Tensor] = None,
         output_attentions: bool = False,
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
+    ) -> Tuple[paddle.Tensor, Optional[paddle.Tensor], Optional[Tuple[paddle.Tensor]]]:
         """Input shape: Batch x Time x Channel"""
 
         # if key_value_states are provided this layer is used as a cross-attention layer
@@ -513,18 +451,18 @@ class Wav2Vec2Attention(nn.Module):
             # reuse k, v, self_attention
             key_states = self._shape(self.k_proj(hidden_states), -1, bsz)
             value_states = self._shape(self.v_proj(hidden_states), -1, bsz)
-            key_states = torch.cat([past_key_value[0], key_states], dim=2)
-            value_states = torch.cat([past_key_value[1], value_states], dim=2)
+            key_states = paddle.concat([past_key_value[0], key_states], axis=2)
+            value_states = paddle.concat([past_key_value[1], value_states], axis=2)
         else:
             # self_attention
             key_states = self._shape(self.k_proj(hidden_states), -1, bsz)
             value_states = self._shape(self.v_proj(hidden_states), -1, bsz)
 
         if self.is_decoder:
-            # if cross_attention save Tuple(torch.Tensor, torch.Tensor) of all cross attention key/value_states.
+            # if cross_attention save Tuple(paddle.Tensor, paddle.Tensor) of all cross attention key/value_states.
             # Further calls to cross_attention layer can then reuse all cross-attention
             # key/value_states (first "if" case)
-            # if uni-directional self-attention (decoder) save Tuple(torch.Tensor, torch.Tensor) of
+            # if uni-directional self-attention (decoder) save Tuple(paddle.Tensor, paddle.Tensor) of
             # all previous decoder key/value_states. Further calls to uni-directional self-attention
             # can concat previous decoder key/value_states to current projected key/value_states (third "elif" case)
             # if encoder bi-directional self-attention `past_key_value` is always `None`
@@ -536,7 +474,7 @@ class Wav2Vec2Attention(nn.Module):
         value_states = value_states.view(*proj_shape)
 
         src_len = key_states.size(1)
-        attn_weights = torch.bmm(query_states, key_states.transpose(1, 2))
+        attn_weights = paddle.bmm(query_states, key_states.transpose(1, 2))
 
         assert attn_weights.size() == (
             bsz * self.num_heads,
@@ -554,7 +492,7 @@ class Wav2Vec2Attention(nn.Module):
             attn_weights = attn_weights.view(bsz, self.num_heads, tgt_len, src_len) + attention_mask
             attn_weights = attn_weights.view(bsz * self.num_heads, tgt_len, src_len)
 
-        attn_weights = F.softmax(attn_weights, dim=-1)
+        attn_weights = F.softmax(attn_weights, axis=-1)
 
         if layer_head_mask is not None:
             assert layer_head_mask.size() == (
@@ -575,7 +513,7 @@ class Wav2Vec2Attention(nn.Module):
 
         attn_probs = F.dropout(attn_weights, p=self.dropout, training=self.training)
 
-        attn_output = torch.bmm(attn_probs, value_states)
+        attn_output = paddle.bmm(attn_probs, value_states)
 
         assert attn_output.size() == (
             bsz * self.num_heads,
@@ -594,7 +532,7 @@ class Wav2Vec2Attention(nn.Module):
         return attn_output, attn_weights_reshaped, past_key_value
 
 
-class Wav2Vec2FeedForward(nn.Module):
+class Wav2Vec2FeedForward(nn.Layer):
     def __init__(self, config):
         super().__init__()
         self.intermediate_dropout = nn.Dropout(config.activation_dropout)
@@ -618,7 +556,7 @@ class Wav2Vec2FeedForward(nn.Module):
         return hidden_states
 
 
-class Wav2Vec2Output(nn.Module):
+class Wav2Vec2Output(nn.Layer):
     def __init__(self, config):
         super().__init__()
 
@@ -626,7 +564,7 @@ class Wav2Vec2Output(nn.Module):
         return hidden_states
 
 
-class Wav2Vec2EncoderLayer(nn.Module):
+class Wav2Vec2EncoderLayer(nn.Layer):
     def __init__(self, config):
         super().__init__()
         self.attention = Wav2Vec2Attention(
@@ -636,9 +574,9 @@ class Wav2Vec2EncoderLayer(nn.Module):
             is_decoder=False,
         )
         self.dropout = nn.Dropout(config.hidden_dropout)
-        self.layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.layer_norm = nn.LayerNorm(config.hidden_size, epsilon=config.layer_norm_eps)
         self.feed_forward = Wav2Vec2FeedForward(config)
-        self.final_layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.final_layer_norm = nn.LayerNorm(config.hidden_size, epsilon=config.layer_norm_eps)
 
     def forward(self, hidden_states, attention_mask=None, output_attentions=False):
         attn_residual = hidden_states
@@ -660,14 +598,14 @@ class Wav2Vec2EncoderLayer(nn.Module):
         return outputs
 
 
-class Wav2Vec2Encoder(nn.Module):
+class Wav2Vec2Encoder(nn.Layer):
     def __init__(self, config):
         super().__init__()
         self.config = config
         self.pos_conv_embed = Wav2Vec2PositionalConvEmbedding(config)
-        self.layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.layer_norm = nn.LayerNorm(config.hidden_size, epsilon=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout)
-        self.layers = nn.ModuleList([Wav2Vec2EncoderLayer(config) for _ in range(config.num_hidden_layers)])
+        self.layers = nn.LayerList([Wav2Vec2EncoderLayer(config) for _ in range(config.num_hidden_layers)])
 
     def forward(
         self,
@@ -722,7 +660,7 @@ class Wav2Vec2Encoder(nn.Module):
 
 
 
-class Wav2Vec2PreTrainedModel(nn.Module):
+class Wav2Vec2PreTrainedModel(nn.Layer):
     """
     An abstract class to handle weights initialization and a simple interface for downloading and loading pretrained
     models.
@@ -741,26 +679,26 @@ class Wav2Vec2PreTrainedModel(nn.Module):
         elif isinstance(module, (nn.LayerNorm, nn.GroupNorm)):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
-        elif isinstance(module, nn.Conv1d):
-            torch.nn.init.kaiming_normal_(module.weight.data)
-        if isinstance(module, (nn.Linear, nn.Conv1d)) and module.bias is not None:
+        elif isinstance(module, nn.Conv1D):
+            paddle.nn.initializer.KaimingNormal(module.weight.data)
+        if isinstance(module, (nn.Linear, nn.Conv1D)) and module.bias is not None:
             module.bias.data.zero_()
     def init_weights(self,):
         self.apply(self._init_weights)
-    def _get_feat_extract_output_lengths(self, input_lengths: torch.LongTensor):
+    def _get_feat_extract_output_lengths(self, input_lengths: paddle.Tensor):
         """
         Computes the output length of the convolutional layers
         """
 
         def _conv_out_length(input_length, kernel_size, stride):
             # 1D convolutional layer output length formula taken
-            # from https://pytorch.org/docs/stable/generated/torch.nn.Conv1d.html
+            # from https://pytorch.org/docs/stable/generated/torch.nn.Conv1D.html
             return (input_length - kernel_size) // stride + 1
 
         for kernel_size, stride in zip(self.config.conv_kernel, self.config.conv_stride):
             input_lengths = _conv_out_length(input_lengths, kernel_size, stride)
 
-        return input_lengths.to(torch.long)
+        return input_lengths.astype('int64')
 
 
 class Wav2Vec2Model(Wav2Vec2PreTrainedModel):
@@ -769,7 +707,9 @@ class Wav2Vec2Model(Wav2Vec2PreTrainedModel):
         self.config = config
         self.feature_extractor = Wav2Vec2FeatureExtractor(config)
         self.feature_projection = Wav2Vec2FeatureProjection(config)
-        self.masked_spec_embed = nn.Parameter(torch.FloatTensor(config.hidden_size).uniform_())
+        #self.masked_spec_embed = nn.Parameter(paddle.Tensor(config.hidden_size).uniform_())
+        self.masked_spec_embed = paddle.create_parameter((config.hidden_size,),'float32')
+
         self.encoder = Wav2Vec2Encoder(config)
 
        # self.init_weights()
@@ -800,11 +740,10 @@ class Wav2Vec2Model(Wav2Vec2PreTrainedModel):
             attention_mask = torch.zeros(
                 hidden_states.shape[:2], dtype=hidden_states.dtype, device=hidden_states.device
             )
-
             # these two operations makes sure that all values
             # before the output lengths indices are attended to
             attention_mask[
-                (torch.arange(attention_mask.shape[0], device=hidden_states.device), output_lengths - 1)
+                (paddle.arange(0,end=attention_mask.shape[0]), output_lengths - 1)
             ] = 1
             attention_mask = attention_mask.flip([-1]).cumsum(-1).flip([-1]).bool()
 
@@ -911,18 +850,18 @@ class Wav2Vec2ForCTC(Wav2Vec2PreTrainedModel):
             target_lengths = labels_mask.sum(-1)
             flattened_targets = labels.masked_select(labels_mask)
 
-            log_probs = F.log_softmax(logits, dim=-1).transpose(0, 1)
+            log_probs = F.log_softmax(logits, axis=-1).transpose(0, 1)
 
-            with torch.backends.cudnn.flags(enabled=False):
-                loss = F.ctc_loss(
-                    log_probs,
-                    flattened_targets,
-                    input_lengths,
-                    target_lengths,
-                    blank=self.config.pad_token_id,
-                    reduction=self.config.ctc_loss_reduction,
-                    zero_infinity=self.config.ctc_zero_infinity,
-                )
+           # with torch.backends.cudnn.flags(enabled=False):
+            loss = F.ctc_loss( # check !!!!
+                log_probs,
+                flattened_targets,
+                input_lengths,
+                target_lengths,
+                blank=self.config.pad_token_id,
+                reduction=self.config.ctc_loss_reduction,
+                zero_infinity=self.config.ctc_zero_infinity,
+            )
 
         if not return_dict:
             output = (logits,) + outputs[1:]
@@ -936,7 +875,7 @@ class Wav2Vec2ForCTC(Wav2Vec2PreTrainedModel):
 if __name__ == '__main__':
     config = Wav2Vec2Config()
     model = Wav2Vec2ForCTC(config)
-
+    paddle.nn.functional.softmax_with_cross_entropy 
     sd = torch.load('model.pth')
     model.load_state_dict(sd)
     model = model.cuda()
